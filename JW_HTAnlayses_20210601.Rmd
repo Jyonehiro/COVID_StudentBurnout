@@ -1,0 +1,547 @@
+---
+title: "COVID-19 and College Student Burnout"
+author: "Jade Yonehiro"
+contact: "Jnyonehiro@ucdavis.edu"
+date: "June 4 2021"
+output:
+  html_document:
+    theme: cosmo
+    df_print: paged
+    highlight: breezedark
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    code_folding: hide
+    code_download: true
+---
+```{r setup, message=FALSE, warning=FALSE}
+# Load in packages we will need
+library(plyr)
+library(tidyr)
+library(dplyr)
+library(tidyverse)
+library(mediation)
+library(rockchalk)
+source('http://psych.colorado.edu/~jclab/R/mcSummaryLm.R')
+
+# Read in our data file, you'll need to specify the path on your computer 
+## Jade's PC pathway
+df = read.csv("C:/Users/Jade/Dropbox/0_Studies/7_JW_HonorsThesis_2021/HT_Data_20210608.csv.",sep=",", header = TRUE)
+## Jade's Mac pathway
+
+#df = read.csv("~/Dropbox/0_Studies/7_JW_HonorsThesis_2021/HT_Data_20210608.csv",sep=",", header = TRUE)
+
+# Clean up the data set
+
+df<-df%>%
+  filter(Progress == 100, #remove people who didn't finish
+         Status != 'Survey Preview', #Remove survey previews
+         Q97 <= '9999999999999999',
+         Q97 != '9999999',
+         Q97 != '99999999999999933718011007',
+         Q97 != '9999999999999999')%>%
+  mutate(LocationLatitude = as.numeric(LocationLatitude),
+         Age=as.numeric(Age))%>%
+  distinct(LocationLatitude, LocationLongitude, .keep_all = TRUE)
+  
+         
+         
+
+df1<- df[-c(1:18)]%>%         # Remove columns we don't need
+  slice(-c(1:13))%>%         # Remove the 1st 2 rows (not needed) and pilot participants (file should start w/participant 23085373104)
+  mutate(id = row_number())  # Add ID number
+``` 
+
+```{r functions}
+# Create a function that will turn Likert items into numbered responses
+
+factorise <- function(x) {
+   case_when(x %in% c("Strongly Disagree [0]") ~ 1,
+             x %in% c("Disagree [1]") ~ 2,
+             x %in% c("Neither Agree nor Disagree [2]") ~ 3,
+             x %in% c("Agree [3]") ~ 4,
+             x %in% c("Strongly Agree [4]") ~ 5,
+             
+             x %in% c("Strongly Disagree [1]") ~ 1,
+             x %in% c("Disagree [2]") ~ 2,
+             x %in% c("Not Sure [3]") ~ 3,
+             x %in% c("Agree [4]") ~ 4,
+             x %in% c("Strongly Agree [5]") ~ 5,
+             
+             x %in% c("Strongly Disagree") ~ 1,
+             x %in% c("Disagree") ~ 2,
+             x %in% c("Neither Agree nor Disagree") ~ 3,
+             x %in% c("Agree") ~ 4,
+             x %in% c("Strongly Agree") ~ 5,
+             
+             x %in% c("Disagree a lot [1]") ~ 1,
+             x %in% c("Neither Agree nor Disagree [3]") ~ 3,
+             x %in% c("Agree a lot [5]") ~ 5,
+             
+             x %in% c("Not at all Stressful [1]") ~ 1,
+             x %in% c("Slightly Stressful [2]") ~ 2,
+             x %in% c("Moderately Stressful [3]") ~ 3,
+             x %in% c("Very Stressful [4]") ~ 4,
+             x %in% c("Extremely Stressful [5]") ~ 5,
+             
+             x %in% c("Not important [1]") ~ 1,
+             x %in% c("Slightly important [2]") ~ 2,
+             x %in% c("Neutral [3]") ~ 3,
+             x %in% c("Moderately important [4]") ~ 4,
+             x %in% c("Important [5]") ~ 5,
+             
+             x %in% c("Never [0]") ~ 0,
+             x %in% c("Rarely [1]") ~ 1,
+             x %in% c("Occasionally [2]") ~ 2,
+             x %in% c("Sometimes [3]") ~ 3,
+             x %in% c("Frequently [4]") ~ 4,
+             x %in% c("Often [5]") ~ 5,
+             x %in% c("Always [6]") ~ 6,
+             
+             x %in% c("Never") ~ 0,
+             x %in% c("Rarely") ~ 1,
+             x %in% c("Sometimes") ~ 2,
+             x %in% c("Often") ~ 3,
+             x %in% c("Always") ~ 4,
+             
+             x %in% c("Nothing at all") ~ 0,
+             x %in% c("None at all") ~ 0,
+             x %in% c("A little") ~ 1,
+             x %in% c("A Moderate Amount") ~ 2,
+             x %in% c("Moderately") ~ 2,
+             x %in% c("A lot") ~ 3,
+             x %in% c("Very") ~ 3,
+             
+             x %in% c("Not at all") ~ 0,
+             x %in% c("Some Days") ~ 1,
+             x %in% c("Most Days") ~ 2,
+             x %in% c("Everyday") ~ 3,
+
+             x %in% c("Yes") ~ 1,
+             x %in% c("No") ~ 2,
+             x %in% c("I don't know") ~ 0,
+             x %in% c("Unsure") ~ 0,
+
+             x %in% c("Not a Threat") ~ 0,
+             x %in% c("Minor Threat") ~ 1,
+             x %in% c("Moderate Threat") ~ 2,
+             x %in% c("Major Threat") ~ 3,
+             
+             x %in% c("No Chance") ~ 0,
+             x %in% c("Low Chance") ~ 1,
+             x %in% c("Moderate Chance") ~ 2,
+             x %in% c("High Chance") ~ 3,
+             
+             x %in% c("Not at all Familiar") ~ 0,
+             x %in% c("Slightly Familiar") ~ 1,
+             x %in% c("Somewhat Familiar") ~ 2,
+             x %in% c("Moderately Familiar") ~ 3,
+             x %in% c("Extremely Familiar") ~ 4
+
+   )}
+
+# Create Reverse coding function for STRESS MINDSET scoring
+reverseCode_SMM <- function(x) {
+   case_when(x %in% c(1) ~ 5,
+             x %in% c(2) ~ 4,
+             x %in% c(3) ~ 3,
+             x %in% c(4) ~ 2,
+             x %in% c(5) ~ 1,
+   )}
+
+# Create Reverse coding function for BURNOUT scoring
+reverseCode_BOI <- function(x) {
+   case_when(x %in% c(0) ~ 6,
+             x %in% c(1) ~ 5,
+             x %in% c(2) ~ 4,
+             x %in% c(3) ~ 3,
+             x %in% c(4) ~ 2,
+             x %in% c(5) ~ 1,
+             x %in% c(6) ~ 0
+   )}
+
+``` 
+
+
+#Data cleaning
+
+- For some reason the column numbers when you look at the df are wrong, so when using *mutate_at()*, use *which(colnames(df2)=="BOI_Professional_Eff_6")* to find true column numers to use (not in this code bc I used the console)!   
+```{r data cleanup}
+
+df2 <- df1%>%
+  mutate_at(c(1:83,94,97:100, 104:200), factorise)         # Apply function to our data set to transform our likert scale items
+  
+
+df2<-df2%>%  
+  ## Stress mindset
+  mutate_at(c(1,3,5,7), reverseCode_SMM)%>%                # Reverse code negative items
+  mutate(SMM = (rowMeans)(df2[,c(1:8)], na.rm=TRUE),       # Find mean across items
+         SMM = round(SMM,2))%>%                            # Round final variable to 2 decimals, higher score = enhancing mindset
+  
+  ## Growth mindset, Self theory
+  mutate_at(c(196:199), reverseCode_SMM)%>%                # Reverse code "increment" items
+  mutate(ITISelf = (rowSums)(df2[,c(192:199)], na.rm=TRUE), # Find sum across ALL ITI_Self items
+         ITISelf = round(ITISelf,2))%>%      
+  
+  ## Burnout
+  mutate_at(c(71:76), reverseCode_BOI)%>%                  # Reverse code negative items
+  mutate(BOI_tot = (rowMeans)(df2[,c(62:76)], na.rm=TRUE),  # Find TOTAL burnout score
+         BOI_tot = round(BOI_tot,2), 
+         
+         BOI_EX = (rowMeans)(df2[,c(62:66)], na.rm=TRUE),   # Find exhaust burnout subscale
+         BOI_EX = round(BOI_EX,2),
+         BOI_CY = (rowMeans)(df2[,c(67:70)], na.rm=TRUE),   # Find exhaust burnout subscale
+         BOI_CY = round(BOI_CY,2),
+         BOI_EF = (rowMeans)(df2[,c(71:76)], na.rm=TRUE),   # Find exhaust burnout subscale
+         BOI_EF = round(BOI_EF,2),
+         )%>%
+  
+  ## Academic stressors
+  mutate(ACStress = (rowMeans)(df2[,c(9:18)], na.rm=TRUE),  # Find TOTAL burnout score
+         ACStress = round(ACStress,2))%>%
+  
+  ## COVID-Impact (Figure out how to make a composite score here)
+  mutate(CABP_Impact1 = as.character(CABP_Impact1),
+         CABP_Impact1 = ifelse(CABP_Impact1 == 'None of the above ', 0,   # there is an added space after "above", make these responses = 0 
+                             ifelse(CABP_Impact1 != 'None of the above ', (str_count(CABP_Impact1, ",")+1),NA)), #Count commas between items and add 1
+         CABP_Impact2 = (rowMeans)(df2[,c(104,105,107,109)], na.rm=TRUE),  # Avg threat perception 
+         CABP_Impact2 = round(CABP_Impact2,2),
+        )
+  
+  ## COVID-Protective Behaviors
+  # dropped for now, too vague to analyze!
+```
+
+# Quick and Dirty Analyses: Moderation
+- https://statsnotebook.io/blog/analysis/moderation_interaction_regression/   
+  + See "Numeric independent variable and numeric moderator"   
+- Moderation analysis is used to examine if the effect of an independent variable on the dependent variable is the same across different levels of another independent variable (moderator). In other words, it is used to examine whether the moderator will change the strength of the relationship between the independent and dependent variables.  
+
+## HONORS THESIS RESULTS
+Stress Mindset and Self-Theory of Intelligence were independently examined as moderators of the relation between COVID-19 Impact and academic stress and COVID-19 Impact and academic burnout Stress mindset, but not theory of intelligence was a marginally significant moderator for academic stress. Students who view stress as debilitating show a greater impact of COVID on academic stress (b = -0.24, 95% CI = [-0.597, 0.010], F(3,175) = -0.086, η2 = 0.021, p = 0.058); however, this pattern is specific, and stress mindset does not apply moderate the relationship between COVID-19 impact and academic burnout (p = 0.7). 
+
+Significant Simple slopes revealed that students who view stress as more debilitating see a greater impact of COVID-19 on academic stress than those who view stress as enhancing. Simple slope for student 1 SD below the mean of stress mindset was 2.70 (b = 0.49, t = 5.07, p<.001), the simple slope for stress mindset with a mean level of academic stress was 3.14 (b = 0.39, t = 4.37, p<.001), and the simple slope for stress mindset 1 SD above the mean of academic stress was 3.58 (b = 0.23, t = 1.98, p=.048; see Figure X).
+
+ 
+# Demographics
+```{r}
+# Clean up variables
+
+#DemoData <- df2%>%
+#  mutate(Gender= ifelse(Gender_1a == 'Male', 1, 
+#                         ifelse(Gender_1a == 'Man/Male', 1,
+#                                ifelse(Gender_1a == 'male', 1,
+#                                       ifelse(Gender_1a == 'MALE', 1,
+#                                              ifelse(Gender_1a == 'Male (he/his)', 2,
+#                ifelse(Gender_1a == 'Female', 2,
+#                        ifelse(Gender_1a == 'female', 2,
+#                                ifelse(Gender_1a == 'woman', 2,
+#                                        ifelse(Gender_1a == 'Cis woman', 2,
+#                                                ifelse(Gender_1a == 'Cis female', 2,
+#                                                         ifelse(Gender_1a == 'female/they', 2,
+#                                                                ifelse(Gender_1a == 'Woman', 2,
+#                                                                       ifelse(Gender_1a == 'Female - cis', 2,
+#               ifelse(Gender_1a == 'Non-binary', 3,
+#               ifelse(Gender_1a == 'Genderfluid', 4,
+#               ifelse(Gender_1a == 'queer', 5, NA )))))))))))))))))%>%
+  
+                                    
+                                      
+#Get summary data  
+df2<-df2%>%
+  filter(Age != 354)%>%
+  mutate(Race = as.factor(Race))
+
+Gender<- df2 %>%
+  group_by(Gender_1a) %>%
+  count(Gender_1a)
+
+mean(df2$Age)  
+sd(df2$Age)
+
+Race<- df2 %>%
+  group_by(Race) %>%
+  count(Race)
+
+```
+
+
+### 1. Burnout = b0 + b1Impact + b2StressMindset + b3Impact*StressMindset + e   
+- No significant effects! It appears as though b1 and b3 are redundant terms (e.g., they are collinear or essentially measuring the same thing) 
+```{r message=F, warning=F}
+Mod1<-lm(BOI_tot ~ CABP_Impact2*SMM, na.action=na.exclude, df2)
+mcSummary(Mod1)
+```
+
+### 2. Academic Stress = b0 + b1Impact + b2StressMindset + b3Impact*StressMindset + e  
+- Impact and Stress mindset are significant predictors, there is a marginally significant interaction (p=0.058) suggesting a moderating effect.  
+- Simple slopes: students who view stress as more debilitating (black solid line) see a greater impact of covid on academic stress than those who view stress as enhancing (green dotted line).  All 3 simple slopes are significant.
+```{r}
+
+Mod2<-lm(ACStress ~ CABP_Impact2*SMM, na.action=na.exclude, df2)
+mcSummary(Mod2)
+
+df2<- df2%>%
+  mutate('COVID19Impact' = CABP_Impact2,
+         'AcademicStress' = ACStress,
+         'StressMindset' = SMM)
+
+PrettyMod2<-lm(AcademicStress ~ COVID19Impact*StressMindset, na.action=na.exclude, df2)
+mcSummary(PrettyMod2)
+
+m1ps <- plotSlopes(PrettyMod2, modx = "StressMindset", plotx = "COVID19Impact", n=3, modxVals="std.dev")
+m1psts <- testSlopes(m1ps)
+round(m1psts$hypotests,4)
+```
+
+
+### Burnout = b0 + b1Impact + b2GrowthMindset+ b3Impact* GrowthMindset   + e   
+- No significant effects!  Growth mindset does not moderate the relationship between COVID impact and burnout
+```{r}
+# Burnout = b0 + b1Impact + b2GrowthMindset+ b3Impact* GrowthMindset   + e 
+###  No significant effects!  Growth mindset does not moderate the relationship between COVID impact and burnout
+Mod3<-lm(BOI_tot ~ CABP_Impact2*ITISelf, na.action=na.exclude, df2)
+mcSummary(Mod3)
+
+Modx<-lm(BOI_tot ~ ITISelf, na.action=na.exclude, df2)
+mcSummary(Modx)
+Modx2<-lm(ACStress ~ ITISelf, na.action=na.exclude, df2)
+mcSummary(Modx2)
+```
+
+
+### Acadmic Stress = b0 + b1Impact + b2GrowthMindset+ b3Impact* GrowthMindset   + e   
+- No significant effects!   Growth mindset does not moderate the relationship between COVID impact and academic stress
+```{r}
+Mod4<-lm(ACStress ~ CABP_Impact2*ITISelf, na.action=na.exclude, df2)
+mcSummary(Mod4)
+```
+
+*NOT INCLUDED IN PAPER*
+### Burnout = b0 + b1Impact + b2Academic Stress+ b3Impact* Academic Stress    + e
+- Academic Stress is a significant predictor of burnout (p=0.04), but the significant effect of COVID impact has disappeared (p=0.1)  
+- There is a significant interaction between Academic Stress and COVID Impact (p=0.19)   
+- Simple slopes suggest as COVID-impact increases, students with average and high levels of academic stress were more likely to report being burnout.   
+```{r}
+Mod5<-lm(BOI_tot ~ CABP_Impact2*ACStress, na.action=na.exclude, df2)
+mcSummary(Mod5)
+m2ps <- plotSlopes(Mod5, modx = "ACStress", plotx = "CABP_Impact2", n=3, modxVals="std.dev")
+m2psts <- testSlopes(m2ps)
+round(m2psts$hypotests,4)
+```
+
+
+######################################################
+# Quick and Dirty Analyses: Mediation 
+- https://data.library.virginia.edu/introduction-to-mediation-analysis/   
+- *Approach:* Baron, R. M., & Kenny, D. A. (1986). The moderator–mediator variable distinction in social psychological research: Conceptual, strategic, and statistical considerations. Journal of Personality and Social Psychology, 5, 1173-1182.   
+
+## Q1: Does stressmindset mediate the relationship between Covid impact and Burnout?  
+- Stress mindset partially mediates this relationship (b = 0.06, p = 0.036). Such that 
+
+```{r eval=FALSE, include=FALSE}
+## Set up our variables 
+set.seed(1234)                              # Set seed for reproducible results with bootstrapping 
+
+X <- df2$CABP_Impact2                       # Our predictor (X) 
+M <- df2$SMM                                # Our mediator (M)
+Y <- df2$BOI_tot                            # Our outcome (Y) 
+M1_data <- data.frame(X = X, Y = Y, M = M)  # Put our variables into a dataframe
+
+## Q1: Relationship between predictor and outcome? Yes
+model.0 <- lm(Y ~ X, M1_data)
+summary(model.0)
+
+## Q2: Relationship between predictor and mediator? Yes
+model.M <- lm(M ~ X, M1_data)
+#summary(model.M)
+
+## Q3: Is  b4  non-significant or smaller than before? 
+model.Y <- lm(Y ~ X + M, M1_data)
+#summary(model.Y)
+
+## Run bootsrapping 
+results <- mediate(model.M, model.Y, treat='X', mediator='M',
+                   boot=TRUE, sims=500)
+summary(results)
+
+#For reading results output:
+### ACME stands for Average Causal Mediation Effects, this is our effect of interest
+### ADE stands for Average Direct Effects, this is the relationship for X and Y after accounting for our mediator 
+### Total Effect is a sum of a mediation (indirect) effect and a direct effect
+
+```
+
+
+## Q2: Does Self-theory mindset mediate the relationship between Covid impact and Burnout? 
+-  There was no relationship between Covid impact and growth mindset, leaving no grounds for medication
+```{r eval=FALSE, include=FALSE}
+## Set up our variables 
+set.seed(1234)                              # Set seed for reproducible results with bootstrapping 
+
+X <- df2$CABP_Impact2                       # Our predictor (X) 
+M <- df2$ITISelf                            # Our mediator (M)
+Y <- df2$BOI_tot                            # Our outcome (Y) 
+M2_data <- data.frame(X = X, Y = Y, M = M)  # Put our variables into a dataframe
+
+## Q1: Relationship between predictor and outcome? Yes
+model.02 <- lm(Y ~ X, M2_data)
+summary(model.02)
+
+## Q2: Relationship between predictor and mediator? 
+### NO! No grounds for mediation
+model.M2 <- lm(M ~ X, M2_data)
+summary(model.M2)
+
+```
+
+## Q3: Does Academic stress mediate the relationship between Covid impact and Burnout?
+-  Yes, when including academic stress as a mediator, the direct effect of covid impact on burnout disappears
+
+```{r eval=FALSE, include=FALSE}
+## Set up our variables 
+set.seed(1234)                              # Set seed for reproducible results with bootstrapping 
+
+X <- df2$CABP_Impact2                       # Our predictor (X) 
+M <- df2$ACStress                           # Our mediator (M)
+Y <- df2$BOI_tot                            # Our outcome (Y) 
+M3_data <- data.frame(X = X, Y = Y, M = M)  # Put our variables into a dataframe
+
+## Q1: Relationship between predictor and outcome? Yes
+model.0 <- lm(Y ~ X, M3_data)
+summary(model.0)
+
+## Q2: Relationship between predictor and mediator? Yes
+model.M <- lm(M ~ X, M3_data)
+summary(model.M)
+
+## Q3: Is  b4  non-significant or smaller than before? 
+model.Y <- lm(Y ~ X + M, M3_data)
+summary(model.Y)
+
+## Run bootsrapping 
+results <- mediate(model.M, model.Y, treat='X', mediator='M',
+                   boot=TRUE, sims=500)
+summary(results)
+#For reading results output:
+### ACME stands for Average Causal Mediation Effects, this is our effect of interest
+### ADE stands for Average Direct Effects, this is the relationship for X and Y after accounting for our mediator 
+### Total Effect is a sum of a mediation (indirect) effect and a direct effect
+
+```
+
+
+## Q4: Multiple mediation! SMM and ACS
+-  It looks like ACS explains the relationship between COVID-19 impact (how much of a threat is covid) and burnout above and beyond stress mindset
+```{r eval=FALSE, include=FALSE}
+library(lavaan)
+
+## Set up our variables 
+set.seed(1234)                              # Set seed for reproducible results with bootstrapping 
+
+X <- df2$CABP_Impact2                       # Our predictor (X) 
+M1 <- df2$ACStress                           # Our 1st mediator (M)
+M2 <- df2$SMM                               # Our 2nd mediator (M2)
+Y <- df2$BOI_tot                            # Our outcome (Y) 
+M4_data <- data.frame(X = X, Y = Y, M1 = M1, M2=M2)  # Put our variables into a dataframe
+
+multipleMediation <- '
+Y ~ b1 * M1 + b2 * M2 + c * X
+M1 ~ a1 * X
+M2 ~ a2 * X
+indirect1 := a1 * b1
+indirect2 := a2 * b2
+total := c + (a1 * b1) + (a2 * b2)
+M1 ~~ M2
+'
+
+constrainedMediation <- '
+Y ~ b1 * M1 + b2 * M2 + c * X
+M1 ~ a1 * X
+M2 ~ a2 * X
+indirect1 := a1 * b1
+indirect2 := a2 * b2
+total := c + (a1 * b1) + (a2 * b2)
+# covariances
+M1 ~~ M2
+# constrain
+indirect1 == indirect2
+'
+
+fit <- sem(model = multipleMediation, data = M4_data)
+#summary(fit)
+bootstrap <- sem(
+    model = multipleMediation,
+    data  = M4_data,
+    se = "bootstrap",
+    bootstrap = 500 # 1000 is the default
+)
+
+summary(bootstrap)
+
+noConstrFit <- sem(model = multipleMediation, data = M4_data)
+constrFit <- sem(model = constrainedMediation, data = M4_data)
+anova(noConstrFit, constrFit)
+
+
+```
+
+## Q5: Does stressmindset mediate the relationship between Covid impact and Academic Stress?  
+```{r eval=FALSE, include=FALSE}
+## Set up our variables 
+set.seed(1234)                              # Set seed for reproducible results with bootstrapping 
+
+X <- df2$CABP_Impact2                       # Our predictor (X) 
+M <- df2$SMM                                # Our mediator (M)
+Y <- df2$ACStress                           # Our outcome (Y) 
+M1_data <- data.frame(X = X, Y = Y, M = M)  # Put our variables into a dataframe
+
+## Q1: Relationship between predictor and outcome? Yes
+model.0 <- lm(Y ~ X, M1_data)
+#summary(model.0)
+
+## Q2: Relationship between predictor and mediator? Yes
+model.M <- lm(M ~ X, M1_data)
+#summary(model.M)
+
+## Q3: Is  b4  non-significant or smaller than before? 
+model.Y <- lm(Y ~ X + M, M1_data)
+#summary(model.Y)
+
+## Run bootsrapping 
+results <- mediate(model.M, model.Y, treat='X', mediator='M',
+                   boot=TRUE, sims=500)
+summary(results)
+
+#For reading results output:
+### ACME stands for Average Causal Mediation Effects, this is our effect of interest
+### ADE stands for Average Direct Effects, this is the relationship for X and Y after accounting for our mediator 
+### Total Effect is a sum of a mediation (indirect) effect and a direct effect
+
+```
+
+## Q5: Does growth mindset mediate the relationship between Covid impact and Academic Stress?  
+- No relationship between growthmindset and Impact
+```{r eval=FALSE, include=FALSE}
+## Set up our variables 
+set.seed(1234)                              # Set seed for reproducible results with bootstrapping 
+
+X <- df2$CABP_Impact2                       # Our predictor (X) 
+M <- df2$ITISelf                                # Our mediator (M)
+Y <- df2$ACStress                           # Our outcome (Y) 
+M1_data <- data.frame(X = X, Y = Y, M = M)  # Put our variables into a dataframe
+
+## Q1: Relationship between predictor and outcome? Yes
+model.0 <- lm(Y ~ X, M1_data)
+#summary(model.0)
+
+## Q2: Relationship between predictor and mediator? Yes
+model.M <- lm(M ~ X, M1_data)
+summary(model.M)
+
+```
+
+
+
+
+
